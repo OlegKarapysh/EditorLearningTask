@@ -5,15 +5,17 @@ public sealed class Editor(Lexer lexer, Colorizer colorizer, Reader reader) : ID
     public void Initialize(string filePath)
     {
         reader.Open(filePath);
-        reader.StartBackgroundIndexing();
+
+        var time = new TimeMeasurement().Measure("Time to fully index file");
+        reader.StartBackgroundIndexing(onFinishedIndexing: time.Dispose);
     }
 
     public void Display(int startLine, int count)
     {
-        reader.EnsureLineIsIndexed(startLine + count - 1);
+        reader.EnsureLineIsIndexed(startLine + count);
 
         // Tokenize from a clean start so multi-line comment state is correct.
-        int cleanStart = reader.FindCleanStartLine(startLine);
+        var cleanStart = reader.FindCleanStartLine(startLine);
         var lines = reader.ReadLines(cleanStart, startLine + count - cleanStart);
         var tokenLines = lexer.Tokenize(lines);
 
@@ -46,12 +48,6 @@ public sealed class Editor(Lexer lexer, Colorizer colorizer, Reader reader) : ID
             var lines = reader.ReadLines(start, count);
             lexer.Tokenize(lines);
         }
-    }
-
-    public void Edit()
-    {
-        // ensure file is fully loaded and tokenized before allowing edits
-        reader.WaitForFullIndexing();
     }
 
     public void Dispose() => reader.Dispose();

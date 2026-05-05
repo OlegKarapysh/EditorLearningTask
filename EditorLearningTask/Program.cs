@@ -5,27 +5,19 @@ if (args is ["generate", _, ..] && int.TryParse(args[1], out int requestedLines)
     Generator.GenerateSqlFile(requestedLines);
 }
 
-var filePath = "output.sql";
-
-if (File.Exists(filePath))
+if (File.Exists(Generator.FileName))
 {
     const int linesPerPage = 30;
+    var editor = new Editor(new Lexer(), new Colorizer(), new Reader());
+    
     var time = new TimeMeasurement();
     using (time.Measure("Total time"))
     {
-        var reader = new Reader();
-        var editor = new Editor(new Lexer(), new Colorizer(), reader);
-
-        editor.Initialize(filePath);
-
-        _ = Task.Run(() =>
-        {
-            using (time.Measure("Time to fully index file"))
-                reader.WaitForFullIndexing();
-        });
-
         using (time.Measure("Time to display first page"))
+        {
+            editor.Initialize(Generator.FileName);
             editor.Display(0, linesPerPage);
+        }
 
         using (time.Measure("Time to display second page"))
             editor.Display(100_000, linesPerPage);
@@ -39,5 +31,5 @@ if (File.Exists(filePath))
 }
 else
 {
-    Console.WriteLine($"File not found: {filePath}");
+    Console.WriteLine($"File not found: {Generator.FileName}");
 }

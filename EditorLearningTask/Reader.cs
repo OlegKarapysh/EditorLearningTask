@@ -8,7 +8,7 @@ namespace EditorLearningTask;
 // under a single lock so a Display call can race ahead when needed.
 public sealed class Reader : IDisposable
 {
-    private const int ChunkSize = 32 * 1024;
+    private const int ChunkSize = 4 * 1024; // 4 KB
     
     private readonly List<long> _lineStarts = [0];
     private readonly byte[] _scanBuffer = new byte[ChunkSize];
@@ -43,7 +43,7 @@ public sealed class Reader : IDisposable
         _accessor = _mmf.CreateViewAccessor(offset: 0, size: _fileSize, access: MemoryMappedFileAccess.Read);
     }
 
-    public void StartBackgroundIndexing()
+    public void StartBackgroundIndexing(Action? onFinishedIndexing = null)
     {
         _backgroundIndex = Task.Run(() =>
         {
@@ -51,17 +51,16 @@ public sealed class Reader : IDisposable
             {
                 lock (_lock)
                 {
-                    if (_scannedTo >= _fileSize) return;
+                    if (IsFullyIndexed)
+                    {
+                        onFinishedIndexing?.Invoke();
+                        return;
+                    }
+                    
                     ScanNextChunk();
                 }
             }
         });
-    }
-
-    // Block until the entire file has been scanned for line offsets.
-    public void WaitForFullIndexing()
-    {
-        _backgroundIndex?.Wait();
     }
 
     // Block until line `lineIndex` is indexed with its end position known.
@@ -71,7 +70,11 @@ public sealed class Reader : IDisposable
         {
             lock (_lock)
             {
-                if (_lineStarts.Count > lineIndex + 1 || _scannedTo >= _fileSize) return;
+                if (_lineStarts.Count > lineIndex || IsFullyIndexed)
+                {
+                    return;
+                }
+                
                 ScanNextChunk();
             }
         }
@@ -104,7 +107,7 @@ public sealed class Reader : IDisposable
             }
         }
 
-        int byteLength = (int)(lineEnds[^1] - bufferStart);
+        var byteLength = (int)(lineEnds[^1] - bufferStart);
         var buffer = new byte[byteLength];
         _accessor.ReadArray(bufferStart, buffer, offset: 0, byteLength);
 
@@ -134,13 +137,14 @@ public sealed class Reader : IDisposable
         {
             throw new Exception("Accessor not initialized");
         }
-        
-        long endByte;
-        lock (_lock) endByte = _lineStarts[targetLine];
-        if (endByte == 0)
+
+        if (targetLine == 0)
         {
             return 0;
         }
+        
+        long endByte;
+        lock (_lock) endByte = _lineStarts[targetLine];
 
         var buffer = new byte[ChunkSize];
         long position = endByte;
@@ -188,6 +192,7 @@ public sealed class Reader : IDisposable
             if (nextLineStart < _fileSize)
                 _lineStarts.Add(nextLineStart);
         }
+        
         _scannedTo += toRead;
     }
 
