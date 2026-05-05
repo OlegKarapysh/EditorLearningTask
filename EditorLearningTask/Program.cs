@@ -18,8 +18,11 @@ if (File.Exists(filePath))
 
         editor.Initialize(filePath);
 
-        using (time.Measure("Time to fully index file"))
-            reader.WaitForFullIndexing();
+        _ = Task.Run(() =>
+        {
+            using (time.Measure("Time to fully index file"))
+                reader.WaitForFullIndexing();
+        });
 
         using (time.Measure("Time to display first page"))
             editor.Display(0, linesPerPage);
