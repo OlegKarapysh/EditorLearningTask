@@ -3,10 +3,9 @@
 if (args is ["generate", _, ..] && int.TryParse(args[1], out int requestedLines) && requestedLines > 0)
 {
     Generator.GenerateSqlFile(requestedLines);
-    return;
 }
 
-var filePath = args.Length >= 1 ? args[0] : "output.sql";
+var filePath = "output.sql";
 
 if (File.Exists(filePath))
 {
@@ -23,6 +22,9 @@ if (File.Exists(filePath))
 
         using (time.Measure("Time to display second page"))
             editor.Display(100_000, linesPerPage);
+        
+        using (time.Measure("Time to display second page"))
+            editor.Display(1_000_000, linesPerPage);
         editor.Edit();
     }
 }
