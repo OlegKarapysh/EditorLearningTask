@@ -1,5 +1,7 @@
 using System.Diagnostics;
 
+namespace EditorLearningTask;
+
 public class TimeMeasurement
 {
     public IDisposable Measure(string description)

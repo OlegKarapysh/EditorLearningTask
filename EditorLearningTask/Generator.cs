@@ -1,11 +1,15 @@
 using System.Text;
 
-class Generator
+namespace EditorLearningTask;
+
+public sealed class Generator
 {
+    public const string FileName = "output.sql";
+    
     public static void GenerateSqlFile(int requestedLines)
     {
-        string[] sampleBlock = new string[]
-        {
+        string[] sampleBlock =
+        [
             "-- Sample SQL file",
             "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), email VARCHAR(100));",
             "INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');",
@@ -28,8 +32,17 @@ class Generator
             "This is a multiline comment",
             "spanning several lines",
             "*/",
+            "INSERT INTO users (id, name, email) VALUES (3, 'Charlie', 'charlie@example.com');",
+            "INSERT INTO users (id, name, email) VALUES (4, 'Dennis', 'dennis@example.com');",
+            "DELETE FROM users WHERE id = 3;",
+            "/*",
+            "This is a multiline comment",
+            "spanning several lines",
+            "and even more lines",
+            "*/",
             // ... (add more varied SQL lines to reach 150 lines)
-        };
+        ];
+        
         var sqlLines = new List<string>(sampleBlock);
         while (sqlLines.Count < 150)
         {
@@ -39,7 +52,9 @@ class Generator
         int fullRepeats = requestedLines / sqlLines.Count;
         int remainder = requestedLines % sqlLines.Count;
         for (int i = 0; i < fullRepeats; i++)
+        {
             outputLines.AddRange(sqlLines);
+        }
         if (remainder > 0)
             outputLines.AddRange(sqlLines.GetRange(0, remainder));
         var expandedLines = new List<string>();
@@ -61,7 +76,7 @@ class Generator
                 i++;
             }
         }
-        var outputPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output.sql");
+        var outputPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
         File.WriteAllLines(outputPath, expandedLines, Encoding.UTF8);
         Console.WriteLine($"Generated {outputPath} with {requestedLines} lines.");
     }
