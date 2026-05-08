@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.MemoryMappedFiles;
 using System.Text;
 
@@ -10,8 +11,9 @@ public sealed class Reader : IDisposable
 {
     private const int ChunkSize = 4 * 1024; // 4 KB
     
-    private readonly List<long> _lineStarts = [0];
     private readonly byte[] _scanBuffer = new byte[ChunkSize];
+    private readonly List<long> _lineStarts = [0];
+    private readonly ConcurrentDictionary<long, TaskCompletionSource> _lineAwaiters = [];
     private readonly Lock _lock = new();
 
     private MemoryMappedFile? _mmf;
@@ -21,15 +23,8 @@ public sealed class Reader : IDisposable
     private long _fileSize;
     private long _scannedTo;
 
-    public bool IsFullyIndexed
-    {
-        get { lock (_lock) return _scannedTo >= _fileSize; }
-    }
-
-    public int IndexedLineCount
-    {
-        get { lock (_lock) return _lineStarts.Count; }
-    }
+    private int IndexedLineCount => _lineStarts.Count;
+    private bool IsFullyIndexed => _scannedTo >= _fileSize;
 
     public void Open(string filePath)
     {
@@ -53,6 +48,11 @@ public sealed class Reader : IDisposable
                 {
                     if (IsFullyIndexed)
                     {
+                        foreach (var lineAwaiter in _lineAwaiters)
+                        {
+                            lineAwaiter.Value.TrySetResult();
+                        }
+                        _lineAwaiters.Clear();
                         onFinishedIndexing?.Invoke();
                         return;
                     }
@@ -63,20 +63,21 @@ public sealed class Reader : IDisposable
         });
     }
 
-    // Block until line `lineIndex` is indexed with its end position known.
-    public void EnsureLineIsIndexed(int lineIndex)
+    // Wait until line `lineIndex` is indexed with its end position known.
+    public Task EnsureLineIsIndexed(int lineIndex)
     {
-        while (true)
+        lock (_lock)
         {
-            lock (_lock)
+            if (IndexedLineCount > lineIndex || IsFullyIndexed)
             {
-                if (_lineStarts.Count > lineIndex || IsFullyIndexed)
-                {
-                    return;
-                }
-                
-                ScanNextChunk();
+                return Task.CompletedTask;
             }
+            
+            var lineAwaiter = _lineAwaiters.GetOrAdd(
+                key: lineIndex,
+                value: new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            
+            return lineAwaiter.Task;
         }
     }
     
@@ -92,7 +93,7 @@ public sealed class Reader : IDisposable
         long[] lineEnds;
         lock (_lock)
         {
-            actualCount = Math.Min(count, _lineStarts.Count - startLine);
+            actualCount = Math.Min(count, IndexedLineCount - startLine);
             if (actualCount <= 0)
             {
                 return [];
@@ -103,7 +104,7 @@ public sealed class Reader : IDisposable
             for (int i = 0; i < actualCount; i++)
             {
                 int index = startLine + i + 1;
-                lineEnds[i] = index < _lineStarts.Count ? _lineStarts[index] : _fileSize;
+                lineEnds[i] = index < IndexedLineCount ? _lineStarts[index] : _fileSize;
             }
         }
 
@@ -153,7 +154,7 @@ public sealed class Reader : IDisposable
         {
             long readStart = Math.Max(0, position - ChunkSize);
             int length = (int)(position - readStart);
-            _accessor.ReadArray(readStart, buffer, 0, length);
+            _accessor.ReadArray(readStart, buffer, offset: 0, length);
 
             if (previousFirst.HasValue && buffer[length - 1] == (byte)'*' && previousFirst.Value == (byte)'/')
             {
@@ -173,24 +174,49 @@ public sealed class Reader : IDisposable
         
         return 0;
     }
+
+    public int GetIndexedLineCount()
+    {
+        lock (_lock) return IndexedLineCount;
+    }
     
     private void ScanNextChunk()
     {
-        int toRead = (int)Math.Min(ChunkSize, _fileSize - _scannedTo);
+        var toRead = Math.Min(ChunkSize, _fileSize - _scannedTo);
         if (toRead <= 0)
         {
+            foreach (var lineAwaiter in _lineAwaiters)
+            {
+                lineAwaiter.Value.TrySetResult();
+            }
+            _lineAwaiters.Clear();
+
             return;
         }
-        
-        _accessor!.ReadArray(_scannedTo, _scanBuffer, offset: 0, toRead);
-        long basePos = _scannedTo;
+
+        if (_accessor is null)
+        {
+            throw new Exception("Accessor not initialized");
+        }
+
+        _accessor.ReadArray(_scannedTo, _scanBuffer, offset: 0, (int)toRead);
         for (int i = 0; i < toRead; i++)
         {
-            if (_scanBuffer[i] != (byte)'\n') continue;
-            long nextLineStart = basePos + i + 1;
+            if (_scanBuffer[i] != (byte)'\n')
+            {
+                continue;
+            }
+            
+            var nextLineStart = _scannedTo + i + 1;
             // Skip the phantom entry past EOF when the file ends with '\n'.
             if (nextLineStart < _fileSize)
+            {
                 _lineStarts.Add(nextLineStart);
+                if (_lineAwaiters.TryRemove(IndexedLineCount, out var lineAwaiter))
+                {
+                    lineAwaiter.SetResult();
+                }
+            }
         }
         
         _scannedTo += toRead;
@@ -202,7 +228,7 @@ public sealed class Reader : IDisposable
         lock (_lock)
         {
             int low = 0;
-            int high = _lineStarts.Count;
+            int high = IndexedLineCount;
             
             while (low < high)
             {
@@ -211,7 +237,7 @@ public sealed class Reader : IDisposable
                 else high = mid;
             }
             
-            return Math.Min(low, _lineStarts.Count - 1);
+            return Math.Min(low, IndexedLineCount - 1);
         }
     }
 

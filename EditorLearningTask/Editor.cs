@@ -1,6 +1,4 @@
-﻿using EditorLearningTask.Writers;
-
-namespace EditorLearningTask;
+﻿namespace EditorLearningTask;
 
 public sealed class Editor(Lexer lexer, Colorizer colorizer, Reader reader, IWriter writer) : IDisposable
 {
@@ -12,9 +10,9 @@ public sealed class Editor(Lexer lexer, Colorizer colorizer, Reader reader, IWri
         reader.StartBackgroundIndexing(onFinishedIndexing: time.Dispose);
     }
 
-    public void Display(int startLine, int count)
+    public async Task Display(int startLine, int count)
     {
-        reader.EnsureLineIsIndexed(startLine + count);
+        await reader.EnsureLineIsIndexed(startLine + count);
 
         // Tokenize from a clean start so multi-line comment state is correct.
         var cleanStart = reader.FindCleanStartLine(startLine);
@@ -33,22 +31,13 @@ public sealed class Editor(Lexer lexer, Colorizer colorizer, Reader reader, IWri
         Console.ResetColor();
     }
 
-    // Tokenize the whole file in batches without producing any output.
-    // Intended for benchmarking — results are discarded between batches.
-    public void TokenizeAll()
+    public async Task TokenizeAll()
     {
-        const int batchSize = 10_000;
-        int total = reader.IndexedLineCount;
-        for (int start = 0; start < total; start += batchSize)
-        {
-            int count = Math.Min(batchSize, total - start);
-            if (count <= 0)
-            {
-                return;
-            }
-            var lines = reader.ReadLines(start, count);
-            lexer.Tokenize(lines);
-        }
+        // Ensure whole file is indexed
+        await reader.EnsureLineIsIndexed(int.MaxValue);
+
+        var lines = reader.ReadLines(startLine: 0, count: reader.GetIndexedLineCount());
+        lexer.Tokenize(lines);
     }
 
     public void Dispose() => reader.Dispose();

@@ -1,4 +1,4 @@
-﻿using EditorLearningTask;
+﻿namespace EditorLearningTask;
 
 public class Colorizer
 {

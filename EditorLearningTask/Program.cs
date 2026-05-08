@@ -1,7 +1,4 @@
-﻿using EditorLearningTask;
-using EditorLearningTask.Writers;
-
-if (args is ["generate", _, ..] && int.TryParse(args[1], out int requestedLines) && requestedLines > 0)
+﻿if (args is ["generate", _, ..] && int.TryParse(args[1], out int requestedLines) && requestedLines > 0)
 {
     Generator.GenerateSqlFile(requestedLines);
 }
@@ -17,17 +14,17 @@ if (File.Exists(Generator.FileName))
         using (time.Measure("Time to display first page"))
         {
             editor.Initialize(Generator.FileName);
-            editor.Display(0, linesPerPage);
+            await editor.Display(0, linesPerPage);
         }
 
         using (time.Measure("Time to display second page"))
-            editor.Display(100_000, linesPerPage);
+            await editor.Display(100_000, linesPerPage);
 
         using (time.Measure("Time to display third page"))
-            editor.Display(1_000_000, linesPerPage);
+            await editor.Display(1_000_000, linesPerPage);
 
         using (time.Measure("Time to tokenize whole file"))
-            editor.TokenizeAll();
+            await editor.TokenizeAll();
     }
 }
 else
