@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="EditorLearningTask/EditorLearningTask.csproj" />
+  <Project Path="EditorLearningTask.Benchmarks/EditorLearningTask.Benchmarks.csproj" />
 </Solution>
