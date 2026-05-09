@@ -5,7 +5,7 @@ using System.Threading.Channels;
 
 namespace EditorLearningTask;
 
-public sealed record LineItem(int Index, string Text);
+public readonly record struct LineItem(int Index, string Text);
 
 // Reads file via memory-mapped view and incrementally indexes line offsets.
 // Indexing can run on a background thread; foreground requests cooperate
@@ -297,7 +297,7 @@ public sealed class Reader : IDisposable
     public void Dispose()
     {
         _disposeCancellationTokenSource.Cancel();
-        try { _backgroundIndex?.Wait(); } catch { }
+        try { _backgroundIndex?.Wait(); } catch { /* don't throw while disposing */ }
 
         _accessor?.Dispose();
         _mmf?.Dispose();
