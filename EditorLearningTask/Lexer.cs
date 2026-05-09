@@ -15,9 +15,9 @@ public sealed class Lexer
     private static List<Token> ScratchTokens => _scratchTokens ??= new List<Token>(128);
 
     // Fills `output[0..count-1]` with tokenized lines. The caller owns the output array.
-    public static void Tokenize(string[] lines, int count, IReadOnlyList<Token>[] output)
+    // `lineEndState` is passed by ref so multi-line token state survives across batch calls.
+    public static void Tokenize(string[] lines, int count, IReadOnlyList<Token>[] output, ref int lineEndState)
     {
-        int lineEndState = 0;
         var scratch = ScratchTokens;
 
         for (int lineNum = 0; lineNum < count; lineNum++)

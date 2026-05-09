@@ -9,6 +9,8 @@ public sealed class Tokenizer
     // Pre-allocated buffers reused across every FlushTokens call
     private readonly string[] _textBuffer = new string[BatchSize];
     private readonly IReadOnlyList<Token>[] _tokenOutput = new IReadOnlyList<Token>[BatchSize];
+    // Survives across batch calls so multi-line tokens (comments, strings) span batch boundaries
+    private int _lineEndState;
 
     public async Task ProduceTokens(
         ChannelReader<LineItem> lineItemsReader,
@@ -52,7 +54,7 @@ public sealed class Tokenizer
             _textBuffer[i] = lineItems[i].Text;
         }
 
-        Lexer.Tokenize(_textBuffer, lineItems.Count, _tokenOutput);
+        Lexer.Tokenize(_textBuffer, lineItems.Count, _tokenOutput, ref _lineEndState);
 
         for (int i = 0; i < lineItems.Count; i++)
         {
