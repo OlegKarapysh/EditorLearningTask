@@ -6,7 +6,7 @@
 if (File.Exists(Generator.FileName))
 {
     const int linesPerPage = 30;
-    var editor = new Editor(new CodeModel(new Reader(), new Tokenizer(new Lexer())), new Colorizer(), new StubWriter());
+    var editor = new Editor(new CodeModel(new Reader(), new Tokenizer()), new Colorizer(), new ConsoleWriter());
     
     var time = new TimeMeasurement();
     using (time.Measure("Total time"))

@@ -2,7 +2,7 @@ using System.Threading.Channels;
 
 namespace EditorLearningTask;
 
-public sealed record CodeLine(int Index, string Text, IReadOnlyList<Token> Tokens);
+public record struct CodeLine(int Index, string Text, IReadOnlyList<Token> Tokens);
 
 // Sink of the pipeline. Stores tokenized lines as they arrive from the
 // Tokenizer stage. Consumers (editor, search, ...) read from here.
@@ -55,26 +55,6 @@ public sealed class CodeModel(Reader reader, Tokenizer tokenizer) : IDisposable
         }, _cts.Token);
     }
 
-    private async Task ConsumeTokens(ChannelReader<CodeLine> channelReader, CancellationToken ct)
-    {
-        await foreach (var line in channelReader.ReadAllAsync(ct))
-        {
-            lock (_lock)
-            {
-                while (_codeLines.Count <= line.Index)
-                {
-                    _codeLines.Add(null);
-                }
-                _codeLines[line.Index] = line;
-                
-                if (_lineAwaiters.Remove(line.Index, out var lineAwaiter))
-                {
-                    lineAwaiter.TrySetResult();
-                }
-            }
-        }
-    }
-
     // Resolves when code line with specified index exists in the model
     public Task EnsureLineLoaded(int lineIndex)
     {
@@ -103,19 +83,39 @@ public sealed class CodeModel(Reader reader, Tokenizer tokenizer) : IDisposable
             var lines = new CodeLine[actualLinesCount];
             for (int i = 0; i < actualLinesCount; i++)
             {
-                lines[i] = _codeLines[startLine + i]!;
+                lines[i] = _codeLines[startLine + i] ?? throw new ArgumentNullException();
             }
             
             return lines;
         }
     }
 
-    public Task EnsureFullyLoaded() => _pipeline ?? Task.CompletedTask;
+    public Task EnsureFullyLoaded() => _pipeline ?? throw new Exception("No file loaded");
 
     public void Dispose()
     {
         _cts.Cancel();
         try { _pipeline?.Wait(); } catch { /* ignore exceptions when disposing */ }
         _cts.Dispose();
+    }
+    
+    private async Task ConsumeTokens(ChannelReader<CodeLine> channelReader, CancellationToken ct)
+    {
+        await foreach (var line in channelReader.ReadAllAsync(ct))
+        {
+            lock (_lock)
+            {
+                while (_codeLines.Count <= line.Index)
+                {
+                    _codeLines.Add(null);
+                }
+                _codeLines[line.Index] = line;
+                
+                if (_lineAwaiters.Remove(line.Index, out var lineAwaiter))
+                {
+                    lineAwaiter.TrySetResult();
+                }
+            }
+        }
     }
 }

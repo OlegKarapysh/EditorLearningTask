@@ -1,359 +1,198 @@
-using System.Text;
+using System.Buffers;
 
-namespace EditorLearningTask
+namespace EditorLearningTask;
+
+public sealed class Lexer
 {
-    public class Lexer
+    private static readonly SearchValues<char> WhitespaceChars = SearchValues.Create(" \t\r\n\f\v");
+    private static readonly SearchValues<char> DigitChars = SearchValues.Create("0123456789");
+    private static readonly SearchValues<char> SymbolChars = SearchValues.Create(",;().=*<>!+-/");
+    private static readonly SearchValues<char> IdentifierContinueChars =
+        SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+
+    [ThreadStatic]
+    private static List<Token>? _scratchTokens;
+    private static List<Token> ScratchTokens => _scratchTokens ??= new List<Token>(128);
+
+    // Fills `output[0..count-1]` with tokenized lines. The caller owns the output array.
+    public static void Tokenize(string[] lines, int count, IReadOnlyList<Token>[] output)
     {
-        // Tokenize each line separately, but maintain state for multiline tokens
-        public List<List<Token>> Tokenize(string[] lines)
+        int lineEndState = 0;
+        var scratch = ScratchTokens;
+
+        for (int lineNum = 0; lineNum < count; lineNum++)
         {
-            var tokenLines = new List<List<Token>>();
-            int lineEndState = 0;
-            int multilineTokenStart = 0;
+            scratch.Clear();
 
-            for (int lineNum = 0; lineNum < lines.Length; lineNum++)
+            var lineMemory = lines[lineNum].AsMemory();
+            var span = lineMemory.Span;
+            int length = span.Length;
+            int position = 0;
+
+            if (lineEndState == SqlTokenTypes.TOKEN_COMMENT)
             {
-                var tokens = new List<Token>();
-                tokenLines.Add(tokens);
-                string line = lines[lineNum];
-                int pos = 0;
-                int length = line.Length;
-                // If we are inside a multiline token, handle it specially
-                if (lineEndState != 0)
+                var endIndex = span.IndexOf("*/".AsSpan());
+                if (endIndex >= 0)
                 {
-                    if (lineEndState == SqlTokenTypes.TOKEN_COMMENT)
-                    {
-                        int endIdx = line.IndexOf("*/", pos, StringComparison.Ordinal);
-                        if (endIdx >= 0)
-                        {
-                            // End of multiline comment found on this line
-                            tokens.Add(new Token(0, endIdx + 2, SqlTokenTypes.TOKEN_COMMENT,
-                                line.Substring(0, endIdx + 2)));
-                            pos = endIdx + 2;
-                            lineEndState = 0;
-                            // Continue lexing the rest of the line after the comment
-                            while (pos < length)
-                            {
-                                char c = line[pos];
-                                if (char.IsWhiteSpace(c))
-                                {
-                                    HandleWhitespace(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                if (c == '-' && pos + 1 < length && line[pos + 1] == '-')
-                                {
-                                    HandleSingleLineComment(line, ref pos, tokens);
-                                    break;
-                                }
-
-                                if (c == '/' && pos + 1 < length && line[pos + 1] == '*')
-                                {
-                                    // Start of another multiline comment
-                                    lineEndState = SqlTokenTypes.TOKEN_COMMENT;
-                                    tokens.Add(new Token(pos, length - pos, SqlTokenTypes.TOKEN_COMMENT,
-                                        line.Substring(pos)));
-                                    pos = length;
-                                    break;
-                                }
-
-                                if (c == '\'')
-                                {
-                                    if (HandleStringLiteral(line, ref pos, ref lineEndState, ref multilineTokenStart,
-                                            tokens))
-                                        break;
-                                    continue;
-                                }
-
-                                if (char.IsDigit(c))
-                                {
-                                    HandleNumber(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                if (char.IsLetter(c) || c == '_')
-                                {
-                                    HandleIdentifierOrKeyword(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                if (",;().=*<>!+-/".IndexOf(c) >= 0)
-                                {
-                                    HandleSymbol(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                HandleUnknown(line, ref pos, tokens);
-                            }
-                        }
-                        else
-                        {
-                            // Still inside multiline comment, emit the whole line as a comment token
-                            tokens.Add(new Token(0, length, SqlTokenTypes.TOKEN_COMMENT, line));
-                            // Remain in multiline comment state
-                        }
-
-                        continue;
-                    }
-                    else if (lineEndState == SqlTokenTypes.TOKEN_STRING)
-                    {
-                        int start = 0;
-                        bool closed = false;
-                        StringBuilder sb = new();
-                        while (start < length)
-                        {
-                            if (line[start] == '\'')
-                            {
-                                if (start + 1 < length && line[start + 1] == '\'')
-                                {
-                                    sb.Append("''");
-                                    start += 2;
-                                    continue;
-                                }
-
-                                sb.Append("'");
-                                start++;
-                                closed = true;
-                                break;
-                            }
-
-                            sb.Append(line[start]);
-                            start++;
-                        }
-
-                        // Emit the string token for this line
-                        tokens.Add(new Token(0, closed ? start : length, SqlTokenTypes.TOKEN_STRING,
-                            "'" + line.Substring(0, closed ? start : length)));
-                        if (closed)
-                        {
-                            lineEndState = 0;
-                            // Continue lexing the rest of the line after the string
-                            pos = start;
-                            while (pos < length)
-                            {
-                                char c = line[pos];
-                                if (char.IsWhiteSpace(c))
-                                {
-                                    HandleWhitespace(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                if (c == '-' && pos + 1 < length && line[pos + 1] == '-')
-                                {
-                                    HandleSingleLineComment(line, ref pos, tokens);
-                                    break;
-                                }
-
-                                if (c == '/' && pos + 1 < length && line[pos + 1] == '*')
-                                {
-                                    tokens.Add(new Token(pos, length - pos, SqlTokenTypes.TOKEN_COMMENT,
-                                        line.Substring(pos)));
-                                    pos = length;
-                                    break;
-                                }
-
-                                if (c == '\'')
-                                {
-                                    if (HandleStringLiteral(line, ref pos, ref lineEndState, ref multilineTokenStart,
-                                            tokens))
-                                        break;
-                                    continue;
-                                }
-
-                                if (char.IsDigit(c))
-                                {
-                                    HandleNumber(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                if (char.IsLetter(c) || c == '_')
-                                {
-                                    HandleIdentifierOrKeyword(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                if (",;().=*<>!+-/".IndexOf(c) >= 0)
-                                {
-                                    HandleSymbol(line, ref pos, tokens);
-                                    continue;
-                                }
-
-                                HandleUnknown(line, ref pos, tokens);
-                            }
-                        }
-
-                        // Otherwise, remain in multiline string state
-                        continue;
-                    }
+                    position = endIndex + 2;
+                    lineEndState = 0;
+                    scratch.Add(new Token(
+                        Start: 0,
+                        Length: endIndex + 2,
+                        Value: SqlTokenTypes.TOKEN_COMMENT,
+                        Text: lineMemory[..(endIndex + 2)]));
                 }
-
-                // Not in multiline state, normal lexing
-                pos = 0;
-                while (pos < length)
+                else
                 {
-                    char c = line[pos];
-                    if (char.IsWhiteSpace(c))
-                    {
-                        HandleWhitespace(line, ref pos, tokens);
-                        continue;
-                    }
-
-                    if (c == '-' && pos + 1 < length && line[pos + 1] == '-')
-                    {
-                        HandleSingleLineComment(line, ref pos, tokens);
-                        break;
-                    }
-
-                    if (c == '/' && pos + 1 < length && line[pos + 1] == '*')
-                    {
-                        int endIdx = line.IndexOf("*/", pos + 2, StringComparison.Ordinal);
-                        if (endIdx >= 0)
-                        {
-                            tokens.Add(new Token(pos, endIdx + 2 - pos, SqlTokenTypes.TOKEN_COMMENT,
-                                line.Substring(pos, endIdx + 2 - pos)));
-                            pos = endIdx + 2;
-                            continue;
-                        }
-                        else
-                        {
-                            // Start of multiline comment
-                            lineEndState = SqlTokenTypes.TOKEN_COMMENT;
-                            tokens.Add(new Token(pos, length - pos, SqlTokenTypes.TOKEN_COMMENT, line.Substring(pos)));
-                            pos = length;
-                            break;
-                        }
-                    }
-
-                    if (c == '\'')
-                    {
-                        if (HandleStringLiteral(line, ref pos, ref lineEndState, ref multilineTokenStart, tokens))
-                            break;
-                        continue;
-                    }
-
-                    if (char.IsDigit(c))
-                    {
-                        HandleNumber(line, ref pos, tokens);
-                        continue;
-                    }
-
-                    if (char.IsLetter(c) || c == '_')
-                    {
-                        HandleIdentifierOrKeyword(line, ref pos, tokens);
-                        continue;
-                    }
-
-                    if (",;().=*<>!+-/".IndexOf(c) >= 0)
-                    {
-                        HandleSymbol(line, ref pos, tokens);
-                        continue;
-                    }
-
-                    HandleUnknown(line, ref pos, tokens);
+                    scratch.Add(new Token(Start: 0, length, SqlTokenTypes.TOKEN_COMMENT, lineMemory));
+                    output[lineNum] = scratch.ToArray();
+                    continue;
+                }
+            }
+            else if (lineEndState == SqlTokenTypes.TOKEN_STRING)
+            {
+                int closeIndex = FindStringClose(span, 0);
+                if (closeIndex >= 0)
+                {
+                    scratch.Add(new Token(0, closeIndex, SqlTokenTypes.TOKEN_STRING, lineMemory[..closeIndex]));
+                    position = closeIndex;
+                    lineEndState = 0;
+                }
+                else
+                {
+                    scratch.Add(new Token(0, length, SqlTokenTypes.TOKEN_STRING, lineMemory));
+                    output[lineNum] = scratch.ToArray();
+                    continue;
                 }
             }
 
-            return tokenLines;
+            TokenizeLine(span, lineMemory, scratch, ref position, ref lineEndState);
+            output[lineNum] = scratch.ToArray();
         }
+    }
 
-        // No longer needed: HandleMultilineToken
+    private static void TokenizeLine(
+        ReadOnlySpan<char> span,
+        ReadOnlyMemory<char> memory,
+        List<Token> tokens,
+        ref int position,
+        ref int lineEndState)
+    {
+        int length = span.Length;
 
-        private void HandleWhitespace(string line, ref int pos, List<Token> tokens)
+        while (position < length)
         {
-            int wsStart = pos;
-            int length = line.Length;
-            while (pos < length && char.IsWhiteSpace(line[pos])) pos++;
-            tokens.Add(new Token(wsStart, pos - wsStart, SqlTokenTypes.TOKEN_WHITESPACE,
-                line.Substring(wsStart, pos - wsStart)));
-        }
+            char c = span[position];
 
-        private void HandleSingleLineComment(string line, ref int pos, List<Token> tokens)
-        {
-            int length = line.Length;
-            tokens.Add(new Token(pos, length - pos, SqlTokenTypes.TOKEN_COMMENT, line.Substring(pos)));
-            pos = length;
-        }
-
-        // No longer needed: HandleMultilineComment
-
-        // Updated to not use multilineBuffer, and to set state for multiline string
-        private bool HandleStringLiteral(string line, ref int pos, ref int lineEndState, ref int multilineTokenStart,
-            List<Token> tokens)
-        {
-            int strStart = pos;
-            int length = line.Length;
-            pos++;
-            bool closed = false;
-            StringBuilder sb = new();
-            sb.Append("'");
-            while (pos < length)
+            if (WhitespaceChars.Contains(c))
             {
-                if (line[pos] == '\'')
+                int run = span[position..].IndexOfAnyExcept(WhitespaceChars);
+                int end = run < 0 ? length : position + run;
+                tokens.Add(new Token(position, end - position, SqlTokenTypes.TOKEN_WHITESPACE, memory[position..end]));
+                position = end;
+                continue;
+            }
+
+            if (c == '-' && position + 1 < length && span[position + 1] == '-')
+            {
+                tokens.Add(new Token(position, length - position, SqlTokenTypes.TOKEN_COMMENT, memory[position..]));
+                return;
+            }
+
+            if (c == '/' && position + 1 < length && span[position + 1] == '*')
+            {
+                int endIdx = span[(position + 2)..].IndexOf("*/".AsSpan());
+                if (endIdx >= 0)
                 {
-                    if (pos + 1 < length && line[pos + 1] == '\'')
-                    {
-                        sb.Append("''");
-                        pos += 2;
-                        continue;
-                    }
-
-                    sb.Append("'");
-                    pos++;
-                    closed = true;
-                    break;
+                    int tokenEnd = position + 2 + endIdx + 2;
+                    tokens.Add(new Token(position, tokenEnd - position, SqlTokenTypes.TOKEN_COMMENT, memory[position..tokenEnd]));
+                    position = tokenEnd;
                 }
-
-                sb.Append(line[pos]);
-                pos++;
+                else
+                {
+                    lineEndState = SqlTokenTypes.TOKEN_COMMENT;
+                    tokens.Add(new Token(position, length - position, SqlTokenTypes.TOKEN_COMMENT, memory[position..]));
+                    return;
+                }
+                continue;
             }
 
-            if (closed)
+            if (c == '\'')
             {
-                tokens.Add(new Token(strStart, sb.Length, SqlTokenTypes.TOKEN_STRING, sb.ToString()));
-                return false;
+                int closeIdx = FindStringClose(span, position + 1);
+                if (closeIdx >= 0)
+                {
+                    tokens.Add(new Token(position, closeIdx - position, SqlTokenTypes.TOKEN_STRING, memory[position..closeIdx]));
+                    position = closeIdx;
+                }
+                else
+                {
+                    lineEndState = SqlTokenTypes.TOKEN_STRING;
+                    tokens.Add(new Token(position, length - position, SqlTokenTypes.TOKEN_STRING, memory[position..]));
+                    return;
+                }
+                continue;
             }
-            else
+
+            if (DigitChars.Contains(c))
             {
-                lineEndState = SqlTokenTypes.TOKEN_STRING;
-                multilineTokenStart = strStart;
-                // Emit the string so far as a token for this line
-                tokens.Add(new Token(strStart, sb.Length, SqlTokenTypes.TOKEN_STRING, sb.ToString()));
-                return true;
+                int run = span[position..].IndexOfAnyExcept(DigitChars);
+                int end = run < 0 ? length : position + run;
+                tokens.Add(new Token(position, end - position, SqlTokenTypes.TOKEN_NUMBER, memory[position..end]));
+                position = end;
+                continue;
             }
-        }
 
-        private void HandleNumber(string line, ref int pos, List<Token> tokens)
-        {
-            int numStart = pos;
-            int length = line.Length;
-            while (pos < length && char.IsDigit(line[pos])) pos++;
-            tokens.Add(new Token(numStart, pos - numStart, SqlTokenTypes.TOKEN_NUMBER,
-                line.Substring(numStart, pos - numStart)));
-        }
+            if (char.IsAsciiLetter(c) || c == '_')
+            {
+                int run = span[position..].IndexOfAnyExcept(IdentifierContinueChars);
+                int end = run < 0 ? length : position + run;
+                int kwType = SqlTokenTypes.GetKeywordToken(span[position..end]);
+                tokens.Add(new Token(position, end - position,
+                    kwType >= 0 ? kwType : SqlTokenTypes.TOKEN_IDENTIFIER,
+                    memory[position..end]));
+                position = end;
+                continue;
+            }
 
-        private void HandleIdentifierOrKeyword(string line, ref int pos, List<Token> tokens)
-        {
-            int idStart = pos;
-            int length = line.Length;
-            while (pos < length && (char.IsLetterOrDigit(line[pos]) || line[pos] == '_')) pos++;
-            string text = line.Substring(idStart, pos - idStart);
-            int kwType = SqlTokenTypes.GetKeywordToken(text.ToUpperInvariant());
-            if (kwType != -1)
-                tokens.Add(new Token(idStart, pos - idStart, kwType, text));
-            else
-                tokens.Add(new Token(idStart, pos - idStart, SqlTokenTypes.TOKEN_IDENTIFIER, text));
-        }
+            if (SymbolChars.Contains(c))
+            {
+                tokens.Add(new Token(position, 1, SqlTokenTypes.TOKEN_SYMBOL, memory[position..(position + 1)]));
+                position++;
+                continue;
+            }
 
-        private void HandleSymbol(string line, ref int pos, List<Token> tokens)
-        {
-            tokens.Add(new Token(pos, 1, SqlTokenTypes.TOKEN_SYMBOL, line.Substring(pos, 1)));
-            pos++;
+            tokens.Add(new Token(position, 1, SqlTokenTypes.TOKEN_UNKNOWN, memory[position..(position + 1)]));
+            position++;
         }
+    }
 
-        private void HandleUnknown(string line, ref int pos, List<Token> tokens)
+    /// <summary>
+    /// Returns the position AFTER the closing quote, or -1 if the string is not closed on this line.
+    /// </summary>
+    /// <param name="span"></param>
+    /// <param name="position">Position must point to the character immediately after the opening quote</param>
+    private static int FindStringClose(ReadOnlySpan<char> span, int position)
+    {
+        while (position < span.Length)
         {
-            tokens.Add(new Token(pos, 1, SqlTokenTypes.TOKEN_UNKNOWN, line.Substring(pos, 1)));
-            pos++;
+            int rel = span[position..].IndexOf('\'');
+            if (rel < 0)
+            {
+                return -1;
+            }
+
+            int abs = position + rel;
+            // '' is an escaped quote — skip both and continue
+            if (abs + 1 < span.Length && span[abs + 1] == '\'')
+            {
+                position = abs + 2;
+                continue;
+            }
+
+            return abs + 1; // position after closing quote
         }
+        
+        return -1;
     }
 }

@@ -1,8 +1,9 @@
+using System.Collections.Frozen;
+
 namespace EditorLearningTask
 {
     public static class SqlTokenTypes
     {
-        // Token type constants
         public const int TOKEN_IDENTIFIER = 1;
         public const int TOKEN_STRING = 2;
         public const int TOKEN_COMMENT = 3;
@@ -11,7 +12,6 @@ namespace EditorLearningTask
         public const int TOKEN_NUMBER = 6;
         public const int TOKEN_UNKNOWN = 7;
 
-        // Keyword constants (start from 100)
         public const int TOKEN_SELECT = 100;
         public const int TOKEN_FROM = 101;
         public const int TOKEN_WHERE = 102;
@@ -41,7 +41,6 @@ namespace EditorLearningTask
         public const int TOKEN_JOIN = 126;
         public const int TOKEN_ON = 127;
 
-        // Non-reserved keyword constants (start from 200)
         public const int TOKEN_ORDER = 200;
         public const int TOKEN_DESC = 201;
         public const int TOKEN_ASC = 202;
@@ -68,72 +67,74 @@ namespace EditorLearningTask
         public const int TOKEN_CAST = 223;
         public const int TOKEN_COALESCE = 224;
 
-        private static readonly Dictionary<string, int> KeywordMap = new(StringComparer.OrdinalIgnoreCase)
-        {
-            { "SELECT", TOKEN_SELECT },
-            { "FROM", TOKEN_FROM },
-            { "WHERE", TOKEN_WHERE },
-            { "INSERT", TOKEN_INSERT },
-            { "INTO", TOKEN_INTO },
-            { "VALUES", TOKEN_VALUES },
-            { "UPDATE", TOKEN_UPDATE },
-            { "SET", TOKEN_SET },
-            { "DELETE", TOKEN_DELETE },
-            { "CREATE", TOKEN_CREATE },
-            { "TABLE", TOKEN_TABLE },
-            { "PRIMARY", TOKEN_PRIMARY },
-            { "KEY", TOKEN_KEY },
-            { "INT", TOKEN_INT },
-            { "VARCHAR", TOKEN_VARCHAR },
-            { "AS", TOKEN_AS },
-            { "BEGIN", TOKEN_BEGIN },
-            { "END", TOKEN_END },
-            { "COMMIT", TOKEN_COMMIT },
-            { "TRANSACTION", TOKEN_TRANSACTION },
-            { "FUNCTION", TOKEN_FUNCTION },
-            { "RETURNS", TOKEN_RETURNS },
-            { "LANGUAGE", TOKEN_LANGUAGE },
-            { "GROUP", TOKEN_GROUP },
-            { "BY", TOKEN_BY },
-            { "LEFT", TOKEN_LEFT },
-            { "JOIN", TOKEN_JOIN },
-            { "ON", TOKEN_ON }
-        };
+        private static readonly FrozenDictionary<string, int> KeywordMap =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "SELECT",      TOKEN_SELECT },
+                { "FROM",        TOKEN_FROM },
+                { "WHERE",       TOKEN_WHERE },
+                { "INSERT",      TOKEN_INSERT },
+                { "INTO",        TOKEN_INTO },
+                { "VALUES",      TOKEN_VALUES },
+                { "UPDATE",      TOKEN_UPDATE },
+                { "SET",         TOKEN_SET },
+                { "DELETE",      TOKEN_DELETE },
+                { "CREATE",      TOKEN_CREATE },
+                { "TABLE",       TOKEN_TABLE },
+                { "PRIMARY",     TOKEN_PRIMARY },
+                { "KEY",         TOKEN_KEY },
+                { "INT",         TOKEN_INT },
+                { "VARCHAR",     TOKEN_VARCHAR },
+                { "AS",          TOKEN_AS },
+                { "BEGIN",       TOKEN_BEGIN },
+                { "END",         TOKEN_END },
+                { "COMMIT",      TOKEN_COMMIT },
+                { "TRANSACTION", TOKEN_TRANSACTION },
+                { "FUNCTION",    TOKEN_FUNCTION },
+                { "RETURNS",     TOKEN_RETURNS },
+                { "LANGUAGE",    TOKEN_LANGUAGE },
+                { "GROUP",       TOKEN_GROUP },
+                { "BY",          TOKEN_BY },
+                { "LEFT",        TOKEN_LEFT },
+                { "JOIN",        TOKEN_JOIN },
+                { "ON",          TOKEN_ON },
+                { "ORDER",       TOKEN_ORDER },
+                { "DESC",        TOKEN_DESC },
+                { "ASC",         TOKEN_ASC },
+                { "LIMIT",       TOKEN_LIMIT },
+                { "OFFSET",      TOKEN_OFFSET },
+                { "HAVING",      TOKEN_HAVING },
+                { "DISTINCT",    TOKEN_DISTINCT },
+                { "UNION",       TOKEN_UNION },
+                { "ALL",         TOKEN_ALL },
+                { "INNER",       TOKEN_INNER },
+                { "OUTER",       TOKEN_OUTER },
+                { "RIGHT",       TOKEN_RIGHT },
+                { "CROSS",       TOKEN_CROSS },
+                { "EXISTS",      TOKEN_EXISTS },
+                { "LIKE",        TOKEN_LIKE },
+                { "IS",          TOKEN_IS },
+                { "NULL",        TOKEN_NULL },
+                { "TRUE",        TOKEN_TRUE },
+                { "FALSE",       TOKEN_FALSE },
+                { "CASE",        TOKEN_CASE },
+                { "WHEN",        TOKEN_WHEN },
+                { "THEN",        TOKEN_THEN },
+                { "ELSE",        TOKEN_ELSE },
+                { "CAST",        TOKEN_CAST },
+                { "COALESCE",    TOKEN_COALESCE },
+            }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-        // Static constructor to add non-reserved keywords
-        static SqlTokenTypes()
-        {
-            KeywordMap["ORDER"] = TOKEN_ORDER;
-            KeywordMap["DESC"] = TOKEN_DESC;
-            KeywordMap["ASC"] = TOKEN_ASC;
-            KeywordMap["LIMIT"] = TOKEN_LIMIT;
-            KeywordMap["OFFSET"] = TOKEN_OFFSET;
-            KeywordMap["HAVING"] = TOKEN_HAVING;
-            KeywordMap["DISTINCT"] = TOKEN_DISTINCT;
-            KeywordMap["UNION"] = TOKEN_UNION;
-            KeywordMap["ALL"] = TOKEN_ALL;
-            KeywordMap["INNER"] = TOKEN_INNER;
-            KeywordMap["OUTER"] = TOKEN_OUTER;
-            KeywordMap["RIGHT"] = TOKEN_RIGHT;
-            KeywordMap["CROSS"] = TOKEN_CROSS;
-            KeywordMap["EXISTS"] = TOKEN_EXISTS;
-            KeywordMap["LIKE"] = TOKEN_LIKE;
-            KeywordMap["IS"] = TOKEN_IS;
-            KeywordMap["NULL"] = TOKEN_NULL;
-            KeywordMap["TRUE"] = TOKEN_TRUE;
-            KeywordMap["FALSE"] = TOKEN_FALSE;
-            KeywordMap["CASE"] = TOKEN_CASE;
-            KeywordMap["WHEN"] = TOKEN_WHEN;
-            KeywordMap["THEN"] = TOKEN_THEN;
-            KeywordMap["ELSE"] = TOKEN_ELSE;
-            KeywordMap["CAST"] = TOKEN_CAST;
-            KeywordMap["COALESCE"] = TOKEN_COALESCE;
-        }
+        // Span-based alternate lookup: case-insensitive, no string allocation
+        private static readonly FrozenDictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> KeywordLookup =
+            KeywordMap.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        public static int GetKeywordToken(string word) => KeywordMap.GetValueOrDefault(word, -1);
+        public static int GetKeywordToken(ReadOnlySpan<char> word) =>
+            KeywordLookup.TryGetValue(word, out int value) ? value : -1;
 
         public static bool IsReservedKeyword(int tokenValue) => tokenValue is >= TOKEN_SELECT and <= TOKEN_ON;
 
-        public static bool IsKeyword(int tokenValue) => KeywordMap.ContainsValue(tokenValue);
+        // All keyword token values are >= TOKEN_SELECT (100); nothing else uses that range
+        public static bool IsKeyword(int tokenValue) => tokenValue >= TOKEN_SELECT;
     }
 }

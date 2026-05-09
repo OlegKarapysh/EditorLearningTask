@@ -16,7 +16,7 @@ public sealed class Editor(CodeModel codeModel, Colorizer colorizer, IWriter wri
         {
             foreach (var token in codeLine.Tokens)
             {
-                writer.Write(colorizer.GetColor(token), token.Text);
+                writer.Write(colorizer.GetColor(token), token.Text.Span);
             }
             writer.WriteLine();
         }
