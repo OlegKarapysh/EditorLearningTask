@@ -1,21 +1,19 @@
 using BenchmarkDotNet.Attributes;
-using EditorLearningTask;
 
 namespace EditorLearningTask.Benchmarks;
 
 /// <summary>
-/// Benchmarks for <see cref="Lexer.Tokenize"/>.
-///
-/// Run with:  dotnet run -c Release --project EditorLearningTask.Benchmarks
+/// Shared input data. Static so both benchmark classes point at the same arrays
+/// without any per-invocation allocation.
 /// </summary>
-[MemoryDiagnoser]
-[HideColumns("Error", "StdDev", "RatioSD", "Ratio")]
-public class LexerBenchmarks
+file static class BenchmarkInput
 {
-    // 30 lines — matches Tokenizer.BatchSize; covers every token type:
+    // 30 lines — matches Tokenizer.BatchSize. Covers every token type:
     // keywords, identifiers, strings (with '' escapes), numbers, symbols,
-    // single-line comments, and a multi-line block comment.
-    private static readonly string[] BatchLines =
+    // single-line comments (--), and a multi-line block comment (/* ... */).
+    // The block comment is fully closed within the batch so lineEndState
+    // returns to 0 after each invocation.
+    public static readonly string[] Batch =
     [
         "SELECT u.id, u.name, COUNT(o.id) AS order_count",
         "FROM users u",
@@ -50,26 +48,59 @@ public class LexerBenchmarks
     ];
 
     // A single long line that exercises every branch (keywords, identifiers,
-    // strings, numbers, symbols) in one pass — useful for per-line profiling.
-    private static readonly string[] SingleLine =
+    // strings, numbers, symbols) in a single pass.
+    public static readonly string[] SingleLine =
     [
         "SELECT u.id, u.name, COUNT(o.id) AS cnt FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.active = TRUE AND o.amount > 0 GROUP BY u.id ORDER BY cnt DESC LIMIT 50;",
     ];
+}
 
-    private readonly IReadOnlyList<Token>[] _batchOutput = new IReadOnlyList<Token>[BatchLines.Length];
-    private readonly IReadOnlyList<Token>[] _singleOutput = new IReadOnlyList<Token>[1];
+// ---------------------------------------------------------------------------
+// 30-line batch
+// ---------------------------------------------------------------------------
 
-    [Benchmark(Baseline = true, Description = "30-line SQL batch")]
-    public void TokenizeBatch()
+/// <summary>
+/// Compares old vs new Lexer on a 30-line SQL batch (= Tokenizer.BatchSize).
+/// LexerOld is the baseline so the Ratio column shows the speedup of the new Lexer.
+/// </summary>
+[MemoryDiagnoser]
+public class LexerBatchBenchmarks
+{
+    private readonly LexerOld _lexerOld = new();
+    private readonly IReadOnlyList<Token>[] _output = new IReadOnlyList<Token>[BenchmarkInput.Batch.Length];
+
+    [Benchmark(Baseline = true, Description = "Old")]
+    public List<List<Token>> Old() => _lexerOld.Tokenize(BenchmarkInput.Batch);
+
+    [Benchmark(Description = "New")]
+    public void New()
     {
         int lineEndState = 0;
-        Lexer.Tokenize(BatchLines, BatchLines.Length, _batchOutput, ref lineEndState);
+        Lexer.Tokenize(BenchmarkInput.Batch, BenchmarkInput.Batch.Length, _output, ref lineEndState);
     }
+}
 
-    [Benchmark(Description = "Single dense SQL line")]
-    public void TokenizeSingleLine()
+// ---------------------------------------------------------------------------
+// Single-line
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Compares old vs new Lexer on a single dense SQL line.
+/// Useful for understanding per-line cost in isolation.
+/// </summary>
+[MemoryDiagnoser]
+public class LexerSingleLineBenchmarks
+{
+    private readonly LexerOld _lexerOld = new();
+    private readonly IReadOnlyList<Token>[] _output = new IReadOnlyList<Token>[1];
+
+    [Benchmark(Baseline = true, Description = "Old")]
+    public List<List<Token>> Old() => _lexerOld.Tokenize(BenchmarkInput.SingleLine);
+
+    [Benchmark(Description = "New")]
+    public void New()
     {
         int lineEndState = 0;
-        Lexer.Tokenize(SingleLine, 1, _singleOutput, ref lineEndState);
+        Lexer.Tokenize(BenchmarkInput.SingleLine, 1, _output, ref lineEndState);
     }
 }
